@@ -547,22 +547,53 @@ async def handle_other_messages(message: types.Message):
 async def main():
     logger.info("🚀 Бот запускается... (без Google Sheets)")
     
-    # Создаем пустой файл для логов, если его нет
-    if not os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "w", encoding="utf-8") as f:
-            f.write("=== Файл заявок BotForge ===\n")
-            f.write(f"Создан: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        logger.info(f"📄 Создан файл для логов: {LOG_FILE}")
-    
     # Удаляем вебхук если был
     await bot.delete_webhook(drop_pending_updates=True)
     
-    # Запускаем поллинг
-    await dp.start_polling(bot)
+    # Запускаем поллинг в фоновой задаче
+    dp.run_polling_task = asyncio.create_task(dp.start_polling(bot))
+    
+    # Создаем событие для ожидания завершения
+    shutdown_event = asyncio.Event()
+    
+    # Обработка сигналов завершения
+    loop = asyncio.get_event_loop()
+    for signal in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(signal, lambda s=signal: asyncio.create_task(shutdown(s)))
+    
+    async def shutdown(sig=None):
+        if sig:
+            logger.info(f"🛑 Получен сигнал {sig.name}")
+        logger.info("🛑 Останавливаю бота...")
+        
+        # Отменяем задачу поллинга
+        if dp.run_polling_task:
+            dp.run_polling_task.cancel()
+            try:
+                await dp.run_polling_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Останавливаем диспетчер
+        await dp.stop_polling()
+        
+        # Закрываем сессию бота
+        await bot.session.close()
+        
+        logger.info("✅ Бот остановлен корректно")
+        shutdown_event.set()
+    
+    # Ждем события завершения
+    await shutdown_event.wait()
 
 if __name__ == "__main__":
+    import signal
+    
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("🛑 Бот остановлен")
+        logger.info("🛑 Бот остановлен вручную")
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка: {e}")
+        exit(1)
 
