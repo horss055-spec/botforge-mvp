@@ -12,11 +12,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# Импорты для Google Sheets
-import gspread
-from google.oauth2.service_account import Credentials
-import json
-
 # ==================== НАСТРОЙКА ЛОГИРОВАНИЯ ====================
 logging.basicConfig(
     level=logging.INFO,
@@ -27,7 +22,6 @@ logger = logging.getLogger(__name__)
 # ==================== ПРОВЕРКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ ====================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
 
 if not BOT_TOKEN:
     logger.error("❌ BOT_TOKEN не установлен!")
@@ -37,81 +31,33 @@ if not ADMIN_CHAT_ID:
     logger.error("❌ ADMIN_CHAT_ID не установлен!")
     exit(1)
 
-if not SPREADSHEET_ID:
-    logger.error("❌ SPREADSHEET_ID не установлен!")
-    logger.error("Добавьте SPREADSHEET_ID в настройки Render")
-    exit(1)
-
 # ==================== ИНИЦИАЛИЗАЦИЯ КОМПОНЕНТОВ ====================
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-# ==================== GOOGLE SHEETS НАСТРОЙКА ====================
-# Инициализация будет выполнена при первом вызове
-SHEETS_SERVICE = None
-WORKSHEET_NAME = "Заявки"
+# ==================== ЛОКАЛЬНОЕ СОХРАНЕНИЕ В ФАЙЛ ====================
+LOG_FILE = "requests.log"
 
-def init_google_sheets():
-    """Инициализирует подключение к Google Sheets."""
-    global SHEETS_SERVICE
+def save_to_log_file(user_data: Dict[str, Any], request_id: str):
+    """Сохраняет заявку в текстовый файл."""
     try:
-        # Чтение credentials из переменной окружения
-        creds_json = os.getenv("GOOGLE_CREDS_JSON")
-        if not creds_json:
-            # Альтернативно: чтение из файла (для локальной разработки)
-            if os.path.exists("credentials.json"):
-                with open("credentials.json", "r") as f:
-                    creds_json = f.read()
-            else:
-                logger.warning("⚠️ Google Sheets отключен. GOOGLE_CREDS_JSON не найден.")
-                return None
-        
-        # Создание учетных данных
-        creds_dict = json.loads(creds_json)
-        scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-        credentials = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-        
-        # Авторизация
-        SHEETS_SERVICE = gspread.authorize(credentials)
-        logger.info("✅ Google Sheets инициализирован")
-        return SHEETS_SERVICE
-        
-    except Exception as e:
-        logger.error(f"❌ Ошибка инициализации Google Sheets: {e}")
-        return None
-
-async def save_to_google_sheets(user_data: Dict[str, Any], request_id: str):
-    """Сохраняет заявку в Google Sheets."""
-    if SHEETS_SERVICE is None:
-        logger.warning("⚠️ Google Sheets не инициализирован, пропускаем сохранение")
-        return False
-    
-    try:
-        # Открываем таблицу и лист
-        spreadsheet = SHEETS_SERVICE.open_by_key(SPREADSHEET_ID)
-        worksheet = spreadsheet.worksheet(WORKSHEET_NAME)
-        
-        # Подготавливаем данные для строки
-        row_data = [
-            request_id,
-            user_data.get('name', ''),
-            user_data.get('contact', ''),
-            user_data.get('business', ''),
-            user_data.get('purpose', ''),
-            user_data.get('description', ''),
-            user_data.get('budget', ''),
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Новая"  # Статус
-        ]
-        
-        # Добавляем строку
-        worksheet.append_row(row_data)
-        logger.info(f"✅ Заявка {request_id} сохранена в Google Sheets")
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"\n{'='*60}\n")
+            f.write(f"Заявка #{request_id} - {timestamp}\n")
+            f.write(f"{'='*60}\n")
+            f.write(f"👤 Имя: {user_data.get('name', '')}\n")
+            f.write(f"📞 Контакт: {user_data.get('contact', '')}\n")
+            f.write(f"🏢 Бизнес: {user_data.get('business', '')}\n")
+            f.write(f"🎯 Цель: {user_data.get('purpose', '')}\n")
+            f.write(f"💰 Бюджет: {user_data.get('budget', '')}\n")
+            f.write(f"📝 Описание:\n{user_data.get('description', '')}\n")
+            f.write(f"{'='*60}\n")
+        logger.info(f"✅ Заявка {request_id} сохранена в {LOG_FILE}")
         return True
-        
     except Exception as e:
-        logger.error(f"❌ Ошибка сохранения в Google Sheets: {e}")
+        logger.error(f"❌ Ошибка сохранения в файл: {e}")
         return False
 
 # ==================== СОСТОЯНИЯ БОТА (FSM) ====================
@@ -199,6 +145,8 @@ async def send_request_to_admin(user_data: Dict[str, Any], user_id: int, request
 
 🆔 <b>User ID:</b> {user_id}
 ⏰ <b>Время:</b> {datetime.now().strftime('%H:%M %d.%m.%Y')}
+
+📄 <b>Сохранено локально в файле:</b> {LOG_FILE}
 """
     keyboard = InlineKeyboardBuilder()
     keyboard.add(InlineKeyboardButton(
@@ -250,6 +198,7 @@ async def cmd_help(message: types.Message):
 /start - начать создание бота
 /help - показать это сообщение
 /cancel - отменить текущий опрос
+/logs - получить файл с заявками (только для админа)
 
 <b>Как это работает:</b>
 1. Вы описываете, какой бот нужен
@@ -275,6 +224,29 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
         "✅ Опрос отменен.\n\n"
         "Если хотите начать заново, напишите /start"
     )
+
+# ==================== КОМАНДА ДЛЯ ПОЛУЧЕНИЯ ЛОГОВ (ТОЛЬКО АДМИН) ====================
+@dp.message(Command("logs"))
+async def cmd_logs(message: types.Message):
+    """Отправляет файл с заявками только администратору."""
+    if str(message.from_user.id) != ADMIN_CHAT_ID:
+        await message.answer("❌ Эта команда только для администратора.")
+        return
+    
+    if not os.path.exists(LOG_FILE):
+        await message.answer("📭 Файл с заявками пока пуст.")
+        return
+    
+    try:
+        with open(LOG_FILE, "rb") as f:
+            await message.answer_document(
+                types.BufferedInputFile(f.read(), filename="requests.log"),
+                caption="📄 Файл со всеми заявками"
+            )
+        logger.info("📤 Админ запросил файл с заявками")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при отправке файла: {e}")
+        logger.error(f"Ошибка отправки логов админу: {e}")
 
 # ==================== ОБРАБОТЧИК ОТМЕНЫ ПО КНОПКЕ ====================
 @dp.callback_query(F.data == "cancel_survey")
@@ -449,10 +421,10 @@ async def confirm_request(callback: types.CallbackQuery, state: FSMContext):
     # Отправляем уведомление администратору
     admin_notified = await send_request_to_admin(user_data, callback.from_user.id, request_id)
     
-    # Сохраняем в Google Sheets
-    sheets_saved = await save_to_google_sheets(user_data, request_id)
+    # Сохраняем в локальный файл
+    file_saved = save_to_log_file(user_data, request_id)
     
-    if admin_notified or sheets_saved:
+    if admin_notified or file_saved:
         success_message = f"""
 ✅ <b>Заявка #{request_id} отправлена!</b>
 
@@ -573,10 +545,14 @@ async def handle_other_messages(message: types.Message):
 
 # ==================== ЗАПУСК БОТА ====================
 async def main():
-    logger.info("🚀 Бот запускается...")
+    logger.info("🚀 Бот запускается... (без Google Sheets)")
     
-    # Инициализируем Google Sheets (неблокирующая)
-    init_google_sheets()
+    # Создаем пустой файл для логов, если его нет
+    if not os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "w", encoding="utf-8") as f:
+            f.write("=== Файл заявок BotForge ===\n")
+            f.write(f"Создан: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        logger.info(f"📄 Создан файл для логов: {LOG_FILE}")
     
     # Удаляем вебхук если был
     await bot.delete_webhook(drop_pending_updates=True)
@@ -589,3 +565,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("🛑 Бот остановлен")
+
