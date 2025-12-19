@@ -313,22 +313,50 @@ async def main():
     # 2. РЕГИСТРИРУЕМ ОБРАБОТЧИКИ
     register_handlers(dp_instance)
     
-    # 3. СОЗДАЁМ ЛОГ-ФАЙЛ ЕСЛИ ЕГО НЕТ
-    if not os.path.exists(LOG_FILE):
-        with open(LOG_FILE, "w", encoding="utf-8") as f:
-            f.write(f"Лог заявок BotForge. Начало: {datetime.now()}\n{'='*60}\n")
+   async def main():
+    """Основная функция запуска бота"""
+    global bot_instance, dp_instance
     
-    # 4. ЗАПУСКАЕМ ФОНОВУЮ ЗАДАЧУ ДЛЯ ЗАПИСИ ЛОГОВ
-    log_task = asyncio.create_task(log_worker())
+    logger.info("🚀 Бот запускается...")
     
+    # 1. СОЗДАЁМ НОВЫЕ ЭКЗЕМПЛЯРЫ БОТА И ДИСПЕТЧЕРА
+    bot_instance = Bot(token=BOT_TOKEN)
+    storage = MemoryStorage()
+    dp_instance = Dispatcher(storage=storage)
+    
+    # 2. РЕГИСТРИРУЕМ ОБРАБОТЧИКИ
+    register_handlers(dp_instance)
+    
+    # 3. КРИТИЧЕСКИ ВАЖНО: ПРИНУДИТЕЛЬНО УДАЛЯЕМ ВЕБХУК
     try:
-        # 5. КРИТИЧЕСКИ ВАЖНО: УДАЛЯЕМ ВЕБХУК ПЕРЕД ЗАПУСКОМ
-        await bot_instance.delete_webhook(drop_pending_updates=True)
-        logger.info("✅ Вебхук удален")
+        # Увеличиваем timeout и force удаление
+        await bot_instance.delete_webhook(
+            drop_pending_updates=True,
+            timeout=10  # Увеличиваем время ожидания
+        )
+        logger.info("✅ Вебхук удален (принудительно)")
         
-        # 6. ЗАПУСКАЕМ ПОЛЛИНГ С skip_updates=True
-        logger.info("🔄 Запускаем поллинг...")
-        await dp_instance.start_polling(bot_instance, skip_updates=True)
+        # Дополнительная задержка для гарантии
+        await asyncio.sleep(2)
+        logger.info("⏳ Задержка 2 секунды для очистки состояния")
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Предупреждение при удалении вебхука: {e}")
+    
+    # 4. ЗАПУСКАЕМ ПОЛЛИНГ С ДОПОЛНИТЕЛЬНЫМИ ПАРАМЕТРАМИ
+    try:
+        logger.info("🔄 Запускаем поллинг с повышенным timeout...")
+        await dp_instance.start_polling(
+            bot_instance,
+            skip_updates=True,
+            allowed_updates=[],  # Начинаем с чистого состояния
+            timeout=60,  # Увеличиваем timeout
+            relax=1  # Увеличиваем паузу между запросами
+        )
+    except Exception as e:
+        logger.error(f"❌ Критическая ошибка при поллинге: {e}")
+    finally:
+        # ... остальной код завершения
         
     except Exception as e:
         logger.error(f"❌ Критическая ошибка: {e}")
