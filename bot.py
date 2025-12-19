@@ -3,10 +3,9 @@ import logging
 import os
 from datetime import datetime
 from typing import Dict, Any
-from contextlib import asynccontextmanager
 
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, StateFilter
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -32,14 +31,13 @@ if not ADMIN_CHAT_ID:
     logger.error("❌ ADMIN_CHAT_ID не установлен!")
     exit(1)
 
-# ==================== СОХРАНЕНИЕ В ФАЙЛ ====================
+# ==================== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ====================
 LOG_FILE = "requests.log"
-
-# Глобальные переменные для хранения состояния
+log_queue = asyncio.Queue()
 bot_instance = None
 dp_instance = None
-log_queue = asyncio.Queue()
 
+# ==================== СОХРАНЕНИЕ В ФАЙЛ ====================
 async def save_to_log(user_data: Dict[str, Any], request_id: str):
     """Добавляет заявку в очередь для записи в текстовый файл."""
     try:
@@ -55,8 +53,7 @@ async def save_to_log(user_data: Dict[str, Any], request_id: str):
 📝 Описание: {user_data.get('description', '')}
 {'='*60}
 """
-        async with log_queue_lock:
-            await log_queue.put(log_entry)
+        await log_queue.put(log_entry)
         return True
     except Exception as e:
         logger.error(f"❌ Ошибка добавления в очередь логов: {e}")
@@ -89,7 +86,6 @@ class BotRequest(StatesGroup):
     waiting_for_purpose = State()
     waiting_for_description = State()
     waiting_for_budget = State()
-    waiting_for_confirmation = State()
 
 # ==================== КЛАВИАТУРЫ ====================
 def get_purpose_keyboard():
@@ -313,26 +309,19 @@ async def main():
     # 2. РЕГИСТРИРУЕМ ОБРАБОТЧИКИ
     register_handlers(dp_instance)
     
-   async def main():
-    """Основная функция запуска бота"""
-    global bot_instance, dp_instance
+    # 3. СОЗДАЁМ ЛОГ-ФАЙЛ ЕСЛИ ЕГО НЕТ
+    if not os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "w", encoding="utf-8") as f:
+            f.write(f"Лог заявок BotForge. Начало: {datetime.now()}\n{'='*60}\n")
     
-    logger.info("🚀 Бот запускается...")
+    # 4. ЗАПУСКАЕМ ФОНОВУЮ ЗАДАЧУ ДЛЯ ЗАПИСИ ЛОГОВ
+    log_task = asyncio.create_task(log_worker())
     
-    # 1. СОЗДАЁМ НОВЫЕ ЭКЗЕМПЛЯРЫ БОТА И ДИСПЕТЧЕРА
-    bot_instance = Bot(token=BOT_TOKEN)
-    storage = MemoryStorage()
-    dp_instance = Dispatcher(storage=storage)
-    
-    # 2. РЕГИСТРИРУЕМ ОБРАБОТЧИКИ
-    register_handlers(dp_instance)
-    
-    # 3. КРИТИЧЕСКИ ВАЖНО: ПРИНУДИТЕЛЬНО УДАЛЯЕМ ВЕБХУК
     try:
-        # Увеличиваем timeout и force удаление
+        # 5. КРИТИЧЕСКИ ВАЖНО: ПРИНУДИТЕЛЬНО УДАЛЯЕМ ВЕБХУК
         await bot_instance.delete_webhook(
             drop_pending_updates=True,
-            timeout=10  # Увеличиваем время ожидания
+            timeout=10
         )
         logger.info("✅ Вебхук удален (принудительно)")
         
@@ -340,26 +329,19 @@ async def main():
         await asyncio.sleep(2)
         logger.info("⏳ Задержка 2 секунды для очистки состояния")
         
-    except Exception as e:
-        logger.warning(f"⚠️ Предупреждение при удалении вебхука: {e}")
-    
-    # 4. ЗАПУСКАЕМ ПОЛЛИНГ С ДОПОЛНИТЕЛЬНЫМИ ПАРАМЕТРАМИ
-    try:
+        # 6. ЗАПУСКАЕМ ПОЛЛИНГ С ДОПОЛНИТЕЛЬНЫМИ ПАРАМЕТРАМИ
         logger.info("🔄 Запускаем поллинг с повышенным timeout...")
         await dp_instance.start_polling(
             bot_instance,
             skip_updates=True,
-            allowed_updates=[],  # Начинаем с чистого состояния
-            timeout=60,  # Увеличиваем timeout
-            relax=1  # Увеличиваем паузу между запросами
+            allowed_updates=[],
+            timeout=60,
+            relax=1
         )
-    except Exception as e:
-        logger.error(f"❌ Критическая ошибка при поллинге: {e}")
-    finally:
-        # ... остальной код завершения
         
     except Exception as e:
-        logger.error(f"❌ Критическая ошибка: {e}")
+        logger.error(f"❌ Критическая ошибка при поллинге: {e}")
+        
     finally:
         # 7. КОРРЕКТНО ЗАВЕРШАЕМ РАБОТУ
         logger.info("🛑 Бот завершает работу...")
