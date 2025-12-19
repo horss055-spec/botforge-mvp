@@ -318,11 +318,9 @@ async def main():
     log_task = asyncio.create_task(log_worker())
     
     try:
+           try:
         # 5. КРИТИЧЕСКИ ВАЖНО: ПРИНУДИТЕЛЬНО УДАЛЯЕМ ВЕБХУК
-        await bot_instance.delete_webhook(
-            drop_pending_updates=True,
-            timeout=10
-        )
+        await bot_instance.delete_webhook(drop_pending_updates=True)
         logger.info("✅ Вебхук удален (принудительно)")
         
         # Дополнительная задержка для гарантии
@@ -330,7 +328,14 @@ async def main():
         logger.info("⏳ Задержка 2 секунды для очистки состояния")
         
         # 6. ЗАПУСКАЕМ ПОЛЛИНГ С ДОПОЛНИТЕЛЬНЫМИ ПАРАМЕТРАМИ
-        logger.info("🔄 Запускаем поллинг с повышенным timeout...")
+        logger.info("🔄 Запускаем поллинг...")
+        await dp_instance.start_polling(
+            bot_instance,
+            skip_updates=True,
+            allowed_updates=[],
+            timeout=60,
+            relax=1
+        )
         await dp_instance.start_polling(
             bot_instance,
             skip_updates=True,
