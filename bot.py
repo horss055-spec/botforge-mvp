@@ -318,7 +318,6 @@ async def main():
     log_task = asyncio.create_task(log_worker())
     
     try:
-           try:
         # 5. КРИТИЧЕСКИ ВАЖНО: ПРИНУДИТЕЛЬНО УДАЛЯЕМ ВЕБХУК
         await bot_instance.delete_webhook(drop_pending_updates=True)
         logger.info("✅ Вебхук удален (принудительно)")
@@ -327,22 +326,9 @@ async def main():
         await asyncio.sleep(2)
         logger.info("⏳ Задержка 2 секунды для очистки состояния")
         
-        # 6. ЗАПУСКАЕМ ПОЛЛИНГ С ДОПОЛНИТЕЛЬНЫМИ ПАРАМЕТРАМИ
+        # 6. ЗАПУСКАЕМ ПОЛЛИНГ
         logger.info("🔄 Запускаем поллинг...")
-        await dp_instance.start_polling(
-            bot_instance,
-            skip_updates=True,
-            allowed_updates=[],
-            timeout=60,
-            relax=1
-        )
-        await dp_instance.start_polling(
-            bot_instance,
-            skip_updates=True,
-            allowed_updates=[],
-            timeout=60,
-            relax=1
-        )
+        await dp_instance.start_polling(bot_instance, skip_updates=True)
         
     except Exception as e:
         logger.error(f"❌ Критическая ошибка при поллинге: {e}")
